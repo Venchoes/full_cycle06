@@ -1,0 +1,9 @@
+version: "3.9"
+services:
+  db:
+    build: db/.
+    volumes:
+      - /var/lib/mysql
+      - ./database.sql:/docker-entrypoint-initdb.d/dump.sql
+    environment:
+       MYSQL_ROOT_PASSWORD: my-password
