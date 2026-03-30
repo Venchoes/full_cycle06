@@ -1,0 +1,77 @@
+name: SAST Scan and Validate
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  semgrep-sast:
+    runs-on: ubuntu-latest
+    container:
+      image: returntocorp/semgrep # Imagem oficial do Semgrep
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        run: |
+          semgrep scan --json --output gl-sast-report.json --config auto
+        
+      - name: Upload SAST Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: sast-report
+          path: gl-sast-report.json
+          if-no-files-found: error
+
+  check-sast-report:
+    needs: semgrep-sast
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download SAST Report
+        uses: actions/download-artifact@v4
+        with:
+          name: sast-report
+
+      - name: Validate SAST Report
+        shell: python
+        run: |
+          import json
+          import os
+
+          # Lendo o relatório
+          report_path = 'gl-sast-report.json'
+          
+          if not os.path.exists(report_path):
+              print("Arquivo de relatório não encontrado!")
+              exit(1)
+
+          with open(report_path) as f:
+              report = json.load(f)
+
+          # O Semgrep CLI gera um JSON ligeiramente diferente do template do GitLab.
+          # Ajustamos o script para ler a chave 'results' do Semgrep ou 'vulnerabilities' do GitLab
+          vulnerabilities = report.get('vulnerabilities', report.get('results', []))
+
+          if vulnerabilities:
+              print(f'\n== Relatório de Vulnerabilidades ({len(vulnerabilities)} encontradas) ==')
+              for vuln in vulnerabilities:
+                  # Mapeamento para garantir compatibilidade com ambos os formatos de JSON
+                  name = vuln.get('extra', {}).get('message', vuln.get('name', 'Sem nome'))
+                  severity = vuln.get('extra', {}).get('severity', vuln.get('severity', 'N/A'))
+                  file = vuln.get('path', vuln.get('location', {}).get('file', 'Arquivo não especificado'))
+                  
+                  # Tratamento de linhas
+                  start_line = vuln.get('start', {}).get('line', vuln.get('location', {}).get('start_line', '?'))
+                  
+                  print(f'\n- Nome: {name}')
+                  print(f'  Severidade: {severity}')
+                  print(f'  Arquivo: {file}')
+                  print(f'  Linha: {start_line}')
+              
+              exit(1)
+          else:
+              print('Nenhuma vulnerabilidade encontrada.')
